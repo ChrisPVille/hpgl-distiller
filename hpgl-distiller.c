@@ -23,6 +23,10 @@
  *	3. Send the HPGL to the printer
  *			cat distillered.hpgl > /dev/ttyS1   (for a serial port cutter)
  *
+ *
+ * Some modifications made by Christopher Parish [https://github.com/ChrisPVille]
+ * All multi-coordinate commands are split into individual lines, working around buffer
+ * overflow problems on my vinyl cutter when processing very long lines
  **/
 
 
@@ -35,7 +39,7 @@
 #include <errno.h>
 #include <math.h>
 
-#define HPGLD_VERSION "0.9.2"
+#define HPGLD_VERSION "0.9.2a"
 #define HPGLD_DEFAULT_INIT_STRING "IN;PU;" // Initialize and Pen-up
 char HPGLD_HELP[]="hpgl-distiller: HPGL Distiller (for vinyl cutters)\n"
 "Written by Paul L Daniels.\n"
@@ -358,7 +362,35 @@ int main(int argc, char **argv) {
 		   ) {
 
 			/* Write the token to the output file */
-			fprintf(fo,"%s;\n",p);
+			int tokenComplete = 0;
+			off_t currentOffInStr = 2;
+			while(!tokenComplete)
+			{
+				fprintf(fo,"%c%c",p[0],p[1]); //(Re)issue the current command
+
+				//If there is a comma separated number in the remaining string (i.e. coords)
+				char*nextComma = strchr(p+currentOffInStr,',');
+				if(nextComma)
+				{
+					//Read in the X and Y coords from the string
+					sscanf(p+currentOffInStr, "%ld,%ld", &px, &py);
+					char*endComma = strchr(nextComma+1,','); //What's the next comma's location (i.e. next coord)
+					size_t tokenSize = 0;
+					if(endComma) tokenSize = (size_t)(endComma-((char*)(p+currentOffInStr)));
+					else tokenComplete = 1;
+
+					//Write the current coords
+					fprintf(fo,"%ld,%ld;\n",px,py);
+
+					currentOffInStr += tokenSize+1; //Plus 1 to skip the comma separaing the sets of x,y pairs
+				}
+				else //If there are no more commas
+				{
+					fprintf(fo,";\n");
+					tokenComplete = 1;
+				}
+			}
+
 			fflush(fo);
 
 			if (glb.slew) {
